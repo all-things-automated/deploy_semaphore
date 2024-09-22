@@ -1,0 +1,88 @@
+---
+# tasks file for deploy_semaphore
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Install required packages
+  ansible.builtin.apt:
+    name:
+      - git
+      - curl
+      - wget
+      - software-properties-common
+      - python3
+      - python3-pip
+    state: present
+
+- name: Add Ansible PPA
+  ansible.builtin.apt_repository:
+    repo: ppa:ansible/ansible
+
+- name: Install Ansible
+  ansible.builtin.apt:
+    name: ansible
+    state: present
+
+- name: Ensure destination directory exists
+  ansible.builtin.file:
+    path: files/
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+
+- name: Download and install MariaDB repo setup
+  ansible.builtin.get_url:
+    url: https://downloads.mariadb.com/MariaDB/mariadb_repo_setup
+    dest: files/mariadb_repo_setup
+    mode: '0755'
+  delegate_to: localhost
+
+- name: Copy mariadb_repo_setup script to remote host
+  ansible.builtin.copy:
+    src: mariadb_repo_setup
+    dest: /tmp/mariadb_repo_setup
+    mode: '0755'
+
+- name: Run MariaDB repo setup
+  ansible.builtin.command: /tmp/mariadb_repo_setup
+
+- name: Install MariaDB server and client
+  ansible.builtin.apt:
+    name:
+      - mariadb-server
+      - mariadb-client
+    state: present
+
+- name: Install MySQL pip package
+  ansible.builtin.pip:
+    name: PyMySQL
+
+
+
+- name: Get Semaphore latest version
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/ansible-semaphore/semaphore/releases/latest
+    return_content: true
+  register: semaphore_release
+
+- name: Parse Semaphore version
+  ansible.builtin.set_fact:
+    semaphore_version: "{{ semaphore_release.json.tag_name | regex_replace('^v', '') }}"
+
+- name: Download Semaphore .deb package
+  ansible.builtin.get_url:
+    url: "https://github.com/ansible-semaphore/semaphore/releases/download/v{{ semaphore_version }}/semaphore_{{ semaphore_version }}_linux_amd64.deb"
+    dest: /tmp/semaphore_{{ semaphore_version }}_linux_amd64.deb
+    mode: '0755'
+
+- name: Install Semaphore
+  ansible.builtin.apt:
+    deb: /tmp/semaphore_{{ semaphore_version }}_linux_amd64.deb
+
+- name: Check Semaphore binary in PATH
+  ansible.builtin.command: which semaphore
+  register: semaphore_path
+  changed_when: false
+  failed_when: "'/usr/bin/semaphore' not in semaphore_path.stdout"
+
